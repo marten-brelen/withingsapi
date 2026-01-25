@@ -4,7 +4,7 @@
   "private": true,
   "description": "Vercel serverless functions for Withings OAuth and data.",
   "engines": {
-    "node": "18.x"
+    "node": "24.x"
   },
   "scripts": {
     "lint": "echo \"No lint configured\"",
