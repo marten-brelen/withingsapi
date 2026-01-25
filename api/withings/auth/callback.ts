@@ -36,16 +36,8 @@ export default async function handler(
     return;
   }
 
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.status(200).send(
-    [
-      "<!doctype html>",
-      "<html>",
-      "<head><title>Withings Connected</title></head>",
-      "<body>",
-      "<p>Withings connected. You can return to Medoxie.</p>",
-      "</body>",
-      "</html>",
-    ].join("")
-  );
+  const redirectUrl =
+    process.env.MEDOXIE_REDIRECT_URL || "https://medoxie.com?withings=success";
+  res.status(302).setHeader("Location", redirectUrl);
+  res.end();
 }
