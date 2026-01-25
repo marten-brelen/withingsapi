@@ -50,11 +50,18 @@ export async function verifyWithingsAuth(
   const address = getHeader(headers, "x-medoxie-address");
   const profileId = getHeader(headers, "x-medoxie-profile-id");
   const timestamp = getHeader(headers, "x-medoxie-timestamp");
-  const message = getHeader(headers, "x-medoxie-message");
+  const encodedMessage = getHeader(headers, "x-medoxie-message");
   const signature = getHeader(headers, "x-medoxie-signature");
 
-  if (!address || !profileId || !timestamp || !message || !signature) {
+  if (!address || !profileId || !timestamp || !encodedMessage || !signature) {
     throw new Error("missing_auth_headers");
+  }
+
+  let message: string;
+  try {
+    message = Buffer.from(encodedMessage, "base64").toString("utf-8");
+  } catch (error) {
+    throw new Error("invalid_message_encoding");
   }
 
   const timestampMs = Number.parseInt(timestamp, 10);
