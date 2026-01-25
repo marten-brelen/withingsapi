@@ -1,20 +1,15 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import {
-  parseJsonBody,
   rejectLargeBody,
   requireMethod,
   sendError,
   sendJson,
 } from "../../../lib/withings/http";
+import { verifyWithingsAuth } from "../../../lib/withings/auth";
 import { refreshAccessToken } from "../../../lib/withings/oauth";
 import { getTokens, setTokens } from "../../../lib/withings/tokenStore";
-
-function extractUserId(req: VercelRequest): string | null {
-  if (typeof req.query.user_id === "string" && req.query.user_id.trim()) {
-    return req.query.user_id.trim();
-  }
-  return null;
-}
+import { verifyLensProfileOwnership } from "../../../lib/withings/lensVerification";
+import { resolveUserIdFromProfile } from "../../../lib/withings/userId";
 
 export default async function handler(
   req: VercelRequest,
@@ -23,16 +18,45 @@ export default async function handler(
   if (!requireMethod(req, res, "POST")) return;
   if (!rejectLargeBody(req, res, 1024)) return;
 
-  let userId = extractUserId(req);
-  if (!userId) {
-    const body = await parseJsonBody(req);
-    if (body && typeof body.user_id === "string") {
-      userId = body.user_id.trim();
+  let auth;
+  try {
+    auth = await verifyWithingsAuth(req.headers, "/token/refresh");
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "auth_failed";
+    if (code === "missing_auth_headers") {
+      sendError(res, 401, "unauthorized", "Missing authentication headers");
+      return;
     }
+    if (code === "invalid_timestamp" || code === "timestamp_out_of_range") {
+      sendError(res, 400, "invalid_request", "Invalid timestamp");
+      return;
+    }
+    sendError(res, 401, "unauthorized", "Invalid signature");
+    return;
   }
 
+  const profileOwned = await verifyLensProfileOwnership(
+    auth.address,
+    auth.profileId
+  );
+  if (!profileOwned) {
+    sendError(
+      res,
+      403,
+      "unauthorized",
+      "Lens profile does not belong to wallet"
+    );
+    return;
+  }
+
+  const userId = await resolveUserIdFromProfile(auth.profileId);
   if (!userId) {
-    sendError(res, 400, "invalid_request", "user_id is required");
+    sendError(
+      res,
+      404,
+      "user_not_found",
+      "No Withings email found for this Lens profile"
+    );
     return;
   }
 
