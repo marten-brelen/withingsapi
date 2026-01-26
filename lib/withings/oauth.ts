@@ -28,6 +28,20 @@ function ensureHttpsRedirect(redirectUri: string): void {
   }
 }
 
+export function validateOAuthEnvVars(): void {
+  const required = [
+    "WITHINGS_CLIENT_ID",
+    "WITHINGS_REDIRECT_URI",
+  ];
+  const missing = required.filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required OAuth environment variables: ${missing.join(", ")}`
+    );
+  }
+  ensureHttpsRedirect(requiredEnv("WITHINGS_REDIRECT_URI"));
+}
+
 export function getWithingsApiBaseUrl(): string {
   return (
     process.env.WITHINGS_API_BASE_URL ||

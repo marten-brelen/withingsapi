@@ -33,10 +33,21 @@ export default async function handler(
     return;
   }
 
-  const profileOwned = await verifyLensProfileOwnership(
-    auth.address,
-    auth.profileId
-  );
+  let profileOwned: boolean;
+  try {
+    profileOwned = await verifyLensProfileOwnership(
+      auth.address,
+      auth.profileId
+    );
+  } catch (error) {
+    console.error("Lens verification failed:", {
+      profileId: auth.profileId,
+      address: auth.address,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    sendError(res, 500, "server_error", "Failed to verify Lens profile");
+    return;
+  }
   if (!profileOwned) {
     sendError(
       res,

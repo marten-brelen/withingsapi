@@ -19,10 +19,18 @@ function getRedis(): Redis {
   const url = process.env.TOKEN_STORE_URL;
   const token = process.env.TOKEN_STORE_TOKEN;
   if (!url || !token) {
-    throw new Error("TOKEN_STORE_URL and TOKEN_STORE_TOKEN are required");
+    throw new Error(
+      `Redis configuration missing: TOKEN_STORE_URL=${!!url}, TOKEN_STORE_TOKEN=${!!token}`
+    );
   }
-  redisClient = new Redis({ url, token });
-  return redisClient;
+  try {
+    redisClient = new Redis({ url, token });
+    return redisClient;
+  } catch (error) {
+    throw new Error(
+      `Failed to initialize Redis client: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 export async function getTokens(userId: string): Promise<TokenBundle | null> {
