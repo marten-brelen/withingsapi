@@ -6,9 +6,9 @@ import {
   sendJson,
 } from "../../../lib/withings/http";
 import { verifyWithingsAuth } from "../../../lib/withings/auth";
-import { refreshAccessToken } from "../../../lib/withings/oauth";
-import { getTokens, setTokens } from "../../../lib/withings/tokenStore";
-import { verifyLensProfileOwnership } from "../../../lib/withings/lensVerification";
+import { refreshAccessToken, buildAuthorizeUrl } from "../../../lib/withings/oauth";
+import { getTokens, setTokens, setState } from "../../../lib/withings/tokenStore";
+import crypto from "crypto";
 
 export default async function handler(
   req: VercelRequest,
@@ -34,37 +34,29 @@ export default async function handler(
     return;
   }
 
-  let profileOwned: boolean;
-  try {
-    profileOwned = await verifyLensProfileOwnership(
-      auth.address,
-      auth.profileId
-    );
-  } catch (error) {
-    console.error("Lens verification failed:", {
-      profileId: auth.profileId,
-      address: auth.address,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    sendError(res, 500, "server_error", "Failed to verify Lens profile");
-    return;
-  }
-  if (!profileOwned) {
-    sendError(
-      res,
-      403,
-      "unauthorized",
-      "Lens profile does not belong to wallet"
-    );
-    return;
-  }
-
   const userId = auth.profileId.toLowerCase();
 
   const stored = await getTokens(userId);
   if (!stored) {
-    sendError(res, 401, "not_connected", "User is not connected");
-    return;
+    // Generate OAuth URL for user to connect
+    try {
+      const state = crypto.randomUUID();
+      await setState(state, userId, 10 * 60); // 10 minutes TTL
+      const url = buildAuthorizeUrl(state);
+      sendJson(res, 401, {
+        error: "oauth_required",
+        message: "Please connect your Withings account",
+        url,
+      });
+      return;
+    } catch (error) {
+      console.error("Failed to generate OAuth URL:", {
+        profileId: auth.profileId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      sendError(res, 500, "server_error", "Failed to generate OAuth URL");
+      return;
+    }
   }
 
   try {

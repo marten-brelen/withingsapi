@@ -2,7 +2,9 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getActivity, WithingsError } from "../../lib/withings/client";
 import { withingsRequestWithRetry } from "../../lib/withings/data";
 import { verifyWithingsAuth } from "../../lib/withings/auth";
-import { verifyLensProfileOwnership } from "../../lib/withings/lensVerification";
+import { buildAuthorizeUrl } from "../../lib/withings/oauth";
+import { setState } from "../../lib/withings/tokenStore";
+import crypto from "crypto";
 import {
   getRequiredDateParam,
   requireMethod,
@@ -33,31 +35,6 @@ export default async function handler(
     return;
   }
 
-  let profileOwned: boolean;
-  try {
-    profileOwned = await verifyLensProfileOwnership(
-      auth.address,
-      auth.profileId
-    );
-  } catch (error) {
-    console.error("Lens verification failed:", {
-      profileId: auth.profileId,
-      address: auth.address,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    sendError(res, 500, "server_error", "Failed to verify Lens profile");
-    return;
-  }
-  if (!profileOwned) {
-    sendError(
-      res,
-      403,
-      "unauthorized",
-      "Lens profile does not belong to wallet"
-    );
-    return;
-  }
-
   const userId = auth.profileId.toLowerCase();
 
   const startdate = getRequiredDateParam(req, res, "startdate");
@@ -74,12 +51,27 @@ export default async function handler(
       ("kind" in result &&
         (result.kind === "not_connected" || result.kind === "reauth_required"))
     ) {
-      if (result.kind === "not_connected") {
-        sendError(res, 401, "not_connected", "User is not connected");
-        return;
+      if (result.kind === "not_connected" || result.kind === "reauth_required") {
+        // Generate OAuth URL for user to connect
+        try {
+          const state = crypto.randomUUID();
+          await setState(state, userId, 10 * 60); // 10 minutes TTL
+          const url = buildAuthorizeUrl(state);
+          sendJson(res, 401, {
+            error: "oauth_required",
+            message: "Please connect your Withings account",
+            url,
+          });
+          return;
+        } catch (error) {
+          console.error("Failed to generate OAuth URL:", {
+            profileId: auth.profileId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          sendError(res, 500, "server_error", "Failed to generate OAuth URL");
+          return;
+        }
       }
-      sendError(res, 401, "reauth_required", "Re-auth required");
-      return;
     }
     sendJson(res, 200, { data: result });
   } catch (error) {
