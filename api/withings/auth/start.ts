@@ -10,7 +10,6 @@ import { verifyWithingsAuth } from "../../../lib/withings/auth";
 import { buildAuthorizeUrl } from "../../../lib/withings/oauth";
 import { setState } from "../../../lib/withings/tokenStore";
 import { verifyLensProfileOwnership } from "../../../lib/withings/lensVerification";
-import { resolveUserIdFromProfile } from "../../../lib/withings/userId";
 
 const STATE_TTL_SECONDS = 10 * 60;
 
@@ -52,17 +51,7 @@ export default async function handler(
     return;
   }
 
-  const userId = await resolveUserIdFromProfile(auth.profileId);
-  if (!userId) {
-    sendError(
-      res,
-      404,
-      "user_not_found",
-      "No Withings email found for this Lens profile"
-    );
-    return;
-  }
-
+  const userId = auth.profileId.toLowerCase();
   const state = crypto.randomUUID();
 
   try {
@@ -70,6 +59,11 @@ export default async function handler(
     const url = buildAuthorizeUrl(state);
     sendJson(res, 200, { url });
   } catch (error) {
+    console.error("OAuth start failed:", {
+      profileId: auth.profileId,
+      address: auth.address,
+      error: error instanceof Error ? error.message : String(error),
+    });
     sendError(res, 500, "server_error", "Failed to start OAuth flow");
   }
 }

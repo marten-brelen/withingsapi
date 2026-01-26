@@ -9,7 +9,6 @@ import { verifyWithingsAuth } from "../../../lib/withings/auth";
 import { refreshAccessToken } from "../../../lib/withings/oauth";
 import { getTokens, setTokens } from "../../../lib/withings/tokenStore";
 import { verifyLensProfileOwnership } from "../../../lib/withings/lensVerification";
-import { resolveUserIdFromProfile } from "../../../lib/withings/userId";
 
 export default async function handler(
   req: VercelRequest,
@@ -49,16 +48,7 @@ export default async function handler(
     return;
   }
 
-  const userId = await resolveUserIdFromProfile(auth.profileId);
-  if (!userId) {
-    sendError(
-      res,
-      404,
-      "user_not_found",
-      "No Withings email found for this Lens profile"
-    );
-    return;
-  }
+  const userId = auth.profileId.toLowerCase();
 
   const stored = await getTokens(userId);
   if (!stored) {

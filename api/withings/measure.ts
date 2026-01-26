@@ -3,7 +3,6 @@ import { getMeasures, WithingsError } from "../../lib/withings/client";
 import { withingsRequestWithRetry } from "../../lib/withings/data";
 import { verifyWithingsAuth } from "../../lib/withings/auth";
 import { verifyLensProfileOwnership } from "../../lib/withings/lensVerification";
-import { resolveUserIdFromProfile } from "../../lib/withings/userId";
 import {
   getRequiredDateParam,
   requireMethod,
@@ -48,16 +47,7 @@ export default async function handler(
     return;
   }
 
-  const userId = await resolveUserIdFromProfile(auth.profileId);
-  if (!userId) {
-    sendError(
-      res,
-      404,
-      "user_not_found",
-      "No Withings email found for this Lens profile"
-    );
-    return;
-  }
+  const userId = auth.profileId.toLowerCase();
 
   const startdate = getRequiredDateParam(req, res, "startdate");
   const enddate = getRequiredDateParam(req, res, "enddate");
