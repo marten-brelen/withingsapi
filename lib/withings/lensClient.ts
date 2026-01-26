@@ -1,8 +1,9 @@
-import { LensClient, production, development } from "@lens-protocol/client";
+import { PublicClient, mainnet, testnet } from "@lens-protocol/client";
 
 const environment =
-  process.env.LENS_ENVIRONMENT === "development" ? development : production;
+  process.env.LENS_ENVIRONMENT === "development" ? testnet : mainnet;
 
-export const lensClient = new LensClient({
+export const lensClient = PublicClient.create({
   environment,
+  fragments: [],
 });

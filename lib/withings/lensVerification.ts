@@ -15,23 +15,12 @@ export async function verifyLensProfileOwnership(
       return false;
     }
 
-    const account = accountResult.value as {
-      account?: { address?: string };
-      address?: string;
-      ownedBy?: { address?: string } | string;
-    };
-
-    const ownerCandidate =
-      account.account?.address ||
-      account.ownedBy?.address ||
-      (typeof account.ownedBy === "string" ? account.ownedBy : undefined) ||
-      account.address;
-
-    if (!ownerCandidate) {
+    const account = accountResult.value as { address?: string };
+    if (!account.address) {
       return false;
     }
 
-    return ownerCandidate.toLowerCase() === walletAddress.toLowerCase();
+    return account.address.toLowerCase() === walletAddress.toLowerCase();
   } catch {
     return false;
   }
