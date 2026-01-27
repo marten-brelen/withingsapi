@@ -8,6 +8,7 @@ import {
 import { verifyWithingsAuth } from "../../../lib/withings/auth";
 import { refreshAccessToken, buildAuthorizeUrl } from "../../../lib/withings/oauth";
 import { getTokens, setTokens, setState } from "../../../lib/withings/tokenStore";
+import { verifyLensProfileOwnership } from "../../../lib/withings/lensVerification";
 import crypto from "crypto";
 
 export default async function handler(
@@ -34,6 +35,32 @@ export default async function handler(
     return;
   }
 
+  let profileOwned: boolean;
+  try {
+    profileOwned = await verifyLensProfileOwnership(
+      auth.address,
+      auth.profileId
+    );
+  } catch (error) {
+    console.error("Lens verification failed:", {
+      profileId: auth.profileId,
+      address: auth.address,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    sendError(res, 500, "server_error", "Failed to verify Lens profile");
+    return;
+  }
+  if (!profileOwned) {
+    sendError(
+      res,
+      403,
+      "unauthorized",
+      "Lens profile does not belong to wallet"
+    );
+    return;
+  }
+
+  // Use profileId to allow multiple profiles per wallet.
   const userId = auth.profileId.toLowerCase();
 
   const stored = await getTokens(userId);
