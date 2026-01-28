@@ -17,31 +17,62 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ): Promise<void> {
-  console.log("Withings auth/start called:", {
-    method: req.method,
-    hasHeaders: !!req.headers,
-    headerKeys: Object.keys(req.headers),
-  });
+  try {
+    console.log("Withings auth/start called:", {
+      method: req.method,
+      hasHeaders: !!req.headers,
+      headerKeys: Object.keys(req.headers),
+      url: req.url,
+    });
 
-  if (!requireMethod(req, res, "GET")) return;
-  if (!enforceHttps(req, res)) return;
+    if (!requireMethod(req, res, "GET")) return;
+    if (!enforceHttps(req, res)) return;
 
   let auth;
   try {
     auth = await verifyWithingsAuth(req.headers, "/auth/start");
   } catch (error) {
     const code = error instanceof Error ? error.message : "auth_failed";
+    console.error("Auth verification failed:", {
+      code,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
     if (code === "missing_auth_headers") {
       sendError(res, 401, "unauthorized", "Missing authentication headers");
+      return;
+    }
+    if (code === "invalid_message_encoding") {
+      sendError(res, 400, "invalid_request", "Invalid message encoding");
+      return;
+    }
+    if (code === "message_mismatch") {
+      sendError(res, 401, "unauthorized", "Message format mismatch");
       return;
     }
     if (code === "invalid_timestamp" || code === "timestamp_out_of_range") {
       sendError(res, 400, "invalid_request", "Invalid timestamp");
       return;
     }
-    sendError(res, 401, "unauthorized", "Invalid signature");
+    if (code === "invalid_signature_format") {
+      sendError(res, 400, "invalid_request", "Invalid signature format");
+      return;
+    }
+    if (code === "invalid_signature" || code === "signature_mismatch") {
+      sendError(res, 401, "unauthorized", "Invalid signature");
+      return;
+    }
+    // Unknown error - return 500 with details
+    console.error("Unexpected auth error:", code);
+    sendError(res, 500, "server_error", `Authentication failed: ${code}`);
     return;
   }
+
+  console.log("Starting Lens verification:", {
+    address: auth.address,
+    profileId: auth.profileId,
+  });
 
   let profileOwned: boolean;
   try {
@@ -49,8 +80,13 @@ export default async function handler(
       auth.address,
       auth.profileId
     );
+    console.log("Lens verification result:", {
+      profileId: auth.profileId,
+      address: auth.address,
+      owned: profileOwned,
+    });
   } catch (error) {
-    console.error("Lens verification failed:", {
+    console.error("Lens verification exception:", {
       profileId: auth.profileId,
       address: auth.address,
       error: error instanceof Error ? error.message : String(error),
@@ -60,6 +96,10 @@ export default async function handler(
     return;
   }
   if (!profileOwned) {
+    console.warn("Lens profile ownership check failed:", {
+      profileId: auth.profileId,
+      address: auth.address,
+    });
     sendError(
       res,
       403,
@@ -119,5 +159,12 @@ export default async function handler(
       stack: error instanceof Error ? error.stack : undefined,
     });
     sendError(res, 500, "server_error", "Failed to build OAuth authorization URL");
+  } catch (error) {
+    // Catch any unexpected errors
+    console.error("Unexpected error in auth/start handler:", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    sendError(res, 500, "server_error", "Internal server error");
   }
 }
