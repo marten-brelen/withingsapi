@@ -27,6 +27,14 @@ async function fetchWithings<T>(
 ): Promise<T> {
   const url = new URL(path, getWithingsApiBaseUrl());
   const body = new URLSearchParams({ action, ...params });
+
+  console.log("Withings API request:", {
+    url: url.toString(),
+    action,
+    params: Object.keys(params),
+    hasAccessToken: !!accessToken,
+  });
+
   const response = await fetch(url.toString(), {
     method: "POST",
     headers: {
@@ -37,6 +45,13 @@ async function fetchWithings<T>(
   });
 
   const data = (await response.json()) as WithingsResponse<T>;
+
+  console.log("Withings API response:", {
+    status: data.status,
+    error: data.error,
+    message: data.message,
+    hasBody: !!data.body,
+  });
 
   if (data.status && data.status !== 0) {
     throw new WithingsError(
@@ -63,7 +78,12 @@ export async function getSleepSummary(
   return fetchWithings(
     "/v2/sleep",
     "getsummary",
-    { startdate, enddate },
+    {
+      startdate,
+      enddate,
+      data_fields:
+        "hr,rr,snoring,hrv,breathing_disturbances,deepsleepduration,lightsleepduration,remsleepduration,wakeupduration,sleep_score,sleep_latency,sleep_efficiency",
+    },
     accessToken
   );
 }
@@ -87,7 +107,7 @@ export async function getActivity(
   enddate: string
 ): Promise<unknown> {
   return fetchWithings(
-    "/v2/activity",
+    "/v2/measure",
     "getactivity",
     { startdate, enddate },
     accessToken
