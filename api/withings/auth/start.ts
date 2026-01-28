@@ -9,7 +9,6 @@ import {
 import { verifyWithingsAuth } from "../../../lib/withings/auth";
 import { buildAuthorizeUrl } from "../../../lib/withings/oauth";
 import { setState } from "../../../lib/withings/tokenStore";
-import { verifyLensProfileOwnership } from "../../../lib/withings/lensVerification";
 
 const STATE_TTL_SECONDS = 10 * 60;
 
@@ -28,7 +27,7 @@ export default async function handler(
     if (!requireMethod(req, res, "GET")) return;
     if (!enforceHttps(req, res)) return;
 
-  let auth;
+    let auth;
   try {
     auth = await verifyWithingsAuth(req.headers, "/auth/start");
   } catch (error) {
@@ -78,96 +77,57 @@ export default async function handler(
     return;
   }
 
-  console.log("Starting Lens verification:", {
-    address: auth.address,
-    profileId: auth.profileId,
-  });
-
-  let profileOwned: boolean;
-  try {
-    profileOwned = await verifyLensProfileOwnership(
-      auth.address,
-      auth.profileId
+      // Validate environment variables before proceeding
+    const requiredEnvVars = [
+      "WITHINGS_CLIENT_ID",
+      "WITHINGS_REDIRECT_URI",
+      "TOKEN_STORE_URL",
+      "TOKEN_STORE_TOKEN",
+    ];
+    const missingEnvVars = requiredEnvVars.filter(
+      (name) => !process.env[name]
     );
-    console.log("Lens verification result:", {
-      profileId: auth.profileId,
-      address: auth.address,
-      owned: profileOwned,
-    });
-  } catch (error) {
-    console.error("Lens verification exception:", {
-      profileId: auth.profileId,
-      address: auth.address,
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    sendError(res, 500, "server_error", "Failed to verify Lens profile");
-    return;
-  }
-  if (!profileOwned) {
-    console.warn("Lens profile ownership check failed:", {
-      profileId: auth.profileId,
-      address: auth.address,
-    });
-    sendError(
-      res,
-      403,
-      "unauthorized",
-      "Lens profile does not belong to wallet"
-    );
-    return;
-  }
+    if (missingEnvVars.length > 0) {
+      console.error("Missing environment variables:", missingEnvVars);
+      sendError(
+        res,
+        500,
+        "server_error",
+        "Server configuration error: missing environment variables"
+      );
+      return;
+    }
 
-  // Validate environment variables before proceeding
-  const requiredEnvVars = [
-    "WITHINGS_CLIENT_ID",
-    "WITHINGS_REDIRECT_URI",
-    "TOKEN_STORE_URL",
-    "TOKEN_STORE_TOKEN",
-  ];
-  const missingEnvVars = requiredEnvVars.filter(
-    (name) => !process.env[name]
-  );
-  if (missingEnvVars.length > 0) {
-    console.error("Missing environment variables:", missingEnvVars);
-    sendError(
-      res,
-      500,
-      "server_error",
-      "Server configuration error: missing environment variables"
-    );
-    return;
-  }
+    // Use profileId to allow multiple profiles per wallet.
+    const userId = auth.profileId.toLowerCase();
+    const state = crypto.randomUUID();
 
-  // Use profileId to allow multiple profiles per wallet.
-  const userId = auth.profileId.toLowerCase();
-  const state = crypto.randomUUID();
+    try {
+      await setState(state, userId, STATE_TTL_SECONDS);
+    } catch (error) {
+      console.error("Failed to set state in Redis:", {
+        profileId: auth.profileId,
+        address: auth.address,
+        state,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      sendError(res, 500, "server_error", "Failed to initialize OAuth state");
+      return;
+    }
 
-  try {
-    await setState(state, userId, STATE_TTL_SECONDS);
-  } catch (error) {
-    console.error("Failed to set state in Redis:", {
-      profileId: auth.profileId,
-      address: auth.address,
-      state,
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    sendError(res, 500, "server_error", "Failed to initialize OAuth state");
-    return;
-  }
-
-  try {
-    const url = buildAuthorizeUrl(state);
-    sendJson(res, 200, { url });
-  } catch (error) {
-    console.error("Failed to build OAuth URL:", {
-      profileId: auth.profileId,
-      address: auth.address,
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    sendError(res, 500, "server_error", "Failed to build OAuth authorization URL");
+    try {
+      const url = buildAuthorizeUrl(state);
+      sendJson(res, 200, { url });
+    } catch (error) {
+      console.error("Failed to build OAuth URL:", {
+        profileId: auth.profileId,
+        address: auth.address,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      sendError(res, 500, "server_error", "Failed to build OAuth authorization URL");
+    }
   } catch (error) {
     // Catch any unexpected errors
     console.error("Unexpected error in auth/start handler:", {
