@@ -47,8 +47,17 @@ export default async function handler(
       sendError(res, 400, "invalid_request", "Invalid message encoding");
       return;
     }
-    if (code === "message_mismatch") {
-      sendError(res, 401, "unauthorized", "Message format mismatch");
+    if (code === "invalid_message_format") {
+      sendError(res, 400, "invalid_request", "Invalid message format");
+      return;
+    }
+    if (
+      code === "address_mismatch" ||
+      code === "profileid_mismatch" ||
+      code === "timestamp_mismatch" ||
+      code === "path_mismatch"
+    ) {
+      sendError(res, 400, "invalid_request", "Message fields do not match headers");
       return;
     }
     if (code === "invalid_timestamp" || code === "timestamp_out_of_range") {

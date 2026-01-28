@@ -77,12 +77,101 @@ export async function verifyWithingsAuth(
   try {
     message = Buffer.from(encodedMessage, "base64").toString("utf-8");
     console.log("Decoded message length:", message.length);
+    console.log("Decoded message:", JSON.stringify(message));
   } catch (error) {
     console.error("Base64 decode failed:", {
       error: error instanceof Error ? error.message : String(error),
       encodedLength: encodedMessage.length,
     });
     throw new Error("invalid_message_encoding");
+  }
+
+  // Parse address and profileId from the decoded message
+  // Format: "Medoxie Withings API Access\naddress: {address}\nprofileId: {profileId}\ntimestamp: {timestamp}\npath: {path}"
+  const messageLines = message.split("\n");
+  if (messageLines.length < 5) {
+    console.error("Invalid message format - insufficient lines:", {
+      lineCount: messageLines.length,
+      lines: messageLines,
+    });
+    throw new Error("invalid_message_format");
+  }
+
+  let messageAddress: string | undefined;
+  let messageProfileId: string | undefined;
+  let messageTimestamp: string | undefined;
+  let messagePath: string | undefined;
+
+  for (const line of messageLines) {
+    if (line.startsWith("address: ")) {
+      messageAddress = line.substring("address: ".length).trim();
+    } else if (line.startsWith("profileId: ")) {
+      messageProfileId = line.substring("profileId: ".length).trim();
+    } else if (line.startsWith("timestamp: ")) {
+      messageTimestamp = line.substring("timestamp: ".length).trim();
+    } else if (line.startsWith("path: ")) {
+      messagePath = line.substring("path: ".length).trim();
+    }
+  }
+
+  console.log("Parsed message fields:", {
+    messageAddress,
+    messageProfileId,
+    messageTimestamp,
+    messagePath,
+    headerAddress: address,
+    headerProfileId: profileId,
+    headerTimestamp: timestamp,
+  });
+
+  if (!messageAddress || !messageProfileId || !messageTimestamp || !messagePath) {
+    console.error("Missing required fields in message:", {
+      hasAddress: !!messageAddress,
+      hasProfileId: !!messageProfileId,
+      hasTimestamp: !!messageTimestamp,
+      hasPath: !!messagePath,
+      messageLines,
+    });
+    throw new Error("invalid_message_format");
+  }
+
+  // Normalize values for comparison
+  const normalizedHeaderAddress = address.toLowerCase();
+  const normalizedHeaderProfileId = profileId.toLowerCase();
+  const normalizedMessageAddress = messageAddress.toLowerCase();
+  const normalizedMessageProfileId = messageProfileId.toLowerCase();
+
+  // Verify message fields match headers
+  if (normalizedMessageAddress !== normalizedHeaderAddress) {
+    console.error("Address mismatch between message and header:", {
+      messageAddress: normalizedMessageAddress,
+      headerAddress: normalizedHeaderAddress,
+    });
+    throw new Error("address_mismatch");
+  }
+
+  if (normalizedMessageProfileId !== normalizedHeaderProfileId) {
+    console.error("ProfileId mismatch between message and header:", {
+      messageProfileId: normalizedMessageProfileId,
+      headerProfileId: normalizedHeaderProfileId,
+    });
+    throw new Error("profileid_mismatch");
+  }
+
+  if (messageTimestamp !== timestamp) {
+    console.error("Timestamp mismatch between message and header:", {
+      messageTimestamp,
+      headerTimestamp: timestamp,
+    });
+    throw new Error("timestamp_mismatch");
+  }
+
+  if (messagePath !== expectedPath) {
+    console.error("Path mismatch:", {
+      messagePath,
+      expectedPath,
+    });
+    throw new Error("path_mismatch");
   }
 
   const timestampMs = Number.parseInt(timestamp, 10);
@@ -102,44 +191,6 @@ export async function verifyWithingsAuth(
     throw new Error("timestamp_out_of_range");
   }
 
-  // Normalize address and profileId to lowercase for consistent comparison
-  const normalizedAddress = address.toLowerCase();
-  const normalizedProfileId = profileId.toLowerCase();
-
-  const expectedMessage = buildExpectedMessage(
-    normalizedAddress,
-    normalizedProfileId,
-    timestamp,
-    expectedPath
-  );
-
-  console.log("Message comparison:", {
-    decodedLength: message.length,
-    expectedLength: expectedMessage.length,
-    decodedPreview: message.substring(0, 100).replace(/\n/g, "\\n"),
-    expectedPreview: expectedMessage.substring(0, 100).replace(/\n/g, "\\n"),
-    match: message === expectedMessage,
-  });
-
-  if (message !== expectedMessage) {
-    // Log detailed diff for debugging
-    const decodedLines = message.split("\n");
-    const expectedLines = expectedMessage.split("\n");
-    console.error("Message mismatch:", {
-      decodedLines: decodedLines.length,
-      expectedLines: expectedLines.length,
-      decoded: JSON.stringify(message),
-      expected: JSON.stringify(expectedMessage),
-      lineByLine: decodedLines.map((line, i) => ({
-        line: i,
-        decoded: line,
-        expected: expectedLines[i],
-        match: line === expectedLines[i],
-      })),
-    });
-    throw new Error("message_mismatch");
-  }
-
   if (!signature.startsWith("0x")) {
     console.error("Invalid signature format:", {
       signaturePrefix: signature.substring(0, 10),
@@ -155,8 +206,9 @@ export async function verifyWithingsAuth(
     });
     console.log("Signature recovered:", {
       recovered: recoveredAddress.toLowerCase(),
-      provided: address.toLowerCase(),
-      match: recoveredAddress.toLowerCase() === address.toLowerCase(),
+      messageAddress: normalizedMessageAddress,
+      headerAddress: normalizedHeaderAddress,
+      match: recoveredAddress.toLowerCase() === normalizedMessageAddress,
     });
   } catch (error) {
     console.error("Signature recovery failed:", {
@@ -166,22 +218,23 @@ export async function verifyWithingsAuth(
     throw new Error("invalid_signature");
   }
 
-  if (recoveredAddress.toLowerCase() !== normalizedAddress) {
-    console.error("Signature mismatch:", {
+  // Verify signature recovers to the address in the message (source of truth)
+  if (recoveredAddress.toLowerCase() !== normalizedMessageAddress) {
+    console.error("Signature mismatch - recovered address doesn't match message address:", {
       recovered: recoveredAddress.toLowerCase(),
-      provided: normalizedAddress,
+      messageAddress: normalizedMessageAddress,
     });
     throw new Error("signature_mismatch");
   }
 
   console.log("Auth verification successful:", {
     address: recoveredAddress.toLowerCase(),
-    profileId: normalizedProfileId,
+    profileId: normalizedMessageProfileId,
   });
 
   return {
     address: recoveredAddress.toLowerCase(),
-    profileId: normalizedProfileId,
+    profileId: normalizedMessageProfileId,
     timestamp: timestampMs,
     path: expectedPath,
   };
