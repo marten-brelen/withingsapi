@@ -1,11 +1,14 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import crypto from "crypto";
 import {
   enforceHttps,
   requireMethod,
   sendError,
 } from "../../../lib/withings/http";
 import { exchangeCodeForTokens } from "../../../lib/withings/oauth";
-import { consumeState, setTokens } from "../../../lib/withings/tokenStore";
+import { consumeState, setOAuthResult } from "../../../lib/withings/tokenStore";
+
+const RESULT_TTL_SECONDS = 10 * 60;
 
 export default async function handler(
   req: VercelRequest,
@@ -22,22 +25,35 @@ export default async function handler(
     return;
   }
 
-  const userId = await consumeState(state);
-  if (!userId) {
+  const owner = await consumeState(state);
+  if (!owner) {
     sendError(res, 400, "invalid_state", "Invalid or expired state");
     return;
   }
 
+  let resultId: string;
   try {
     const tokens = await exchangeCodeForTokens(code);
-    await setTokens(userId, tokens);
+    resultId = crypto.randomUUID();
+    await setOAuthResult(
+      resultId,
+      {
+        ...owner,
+        tokenBundle: tokens,
+        createdAt: Date.now(),
+      },
+      RESULT_TTL_SECONDS
+    );
   } catch {
     sendError(res, 500, "oauth_error", "Failed to exchange code for tokens");
     return;
   }
 
-  const redirectUrl =
+  const redirectTarget =
     process.env.MEDOXIE_REDIRECT_URL || "https://medoxie.com?withings=success";
-  res.status(302).setHeader("Location", redirectUrl);
+  const redirectUrl = new URL(redirectTarget);
+  redirectUrl.searchParams.set("withings", "success");
+  redirectUrl.searchParams.set("withings_result", resultId);
+  res.status(302).setHeader("Location", redirectUrl.toString());
   res.end();
 }

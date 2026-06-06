@@ -1,42 +1,45 @@
 import { WithingsError } from "./client";
 import { refreshAccessToken } from "./oauth";
-import { getTokens, setTokens, TokenBundle } from "./tokenStore";
+import { TokenBundle } from "./tokenStore";
 
 const REFRESH_WINDOW_MS = 30_000;
 
-type TokenStatus =
-  | { kind: "ok"; tokens: TokenBundle }
-  | { kind: "not_connected" }
+export type WithingsDataResult<T> =
+  | { kind: "ok"; data: T; tokenBundle: TokenBundle; refreshed: boolean }
   | { kind: "reauth_required" };
 
-async function ensureTokens(userId: string): Promise<TokenStatus> {
-  const tokens = await getTokens(userId);
-  if (!tokens) {
-    return { kind: "not_connected" };
-  }
+async function ensureTokens(tokens: TokenBundle): Promise<
+  | { kind: "ok"; tokenBundle: TokenBundle; refreshed: boolean }
+  | { kind: "reauth_required" }
+> {
   if (tokens.expires_at > Date.now() + REFRESH_WINDOW_MS) {
-    return { kind: "ok", tokens };
+    return { kind: "ok", tokenBundle: tokens, refreshed: false };
   }
   try {
     const refreshed = await refreshAccessToken(tokens.refresh_token);
-    await setTokens(userId, refreshed);
-    return { kind: "ok", tokens: refreshed };
+    return { kind: "ok", tokenBundle: refreshed, refreshed: true };
   } catch {
     return { kind: "reauth_required" };
   }
 }
 
 export async function withingsRequestWithRetry<T>(
-  userId: string,
+  tokens: TokenBundle,
   requestFn: (accessToken: string) => Promise<T>
-): Promise<T | TokenStatus> {
-  const status = await ensureTokens(userId);
+): Promise<WithingsDataResult<T>> {
+  const status = await ensureTokens(tokens);
   if (status.kind !== "ok") {
     return status;
   }
 
   try {
-    return await requestFn(status.tokens.access_token);
+    const data = await requestFn(status.tokenBundle.access_token);
+    return {
+      kind: "ok",
+      data,
+      tokenBundle: status.tokenBundle,
+      refreshed: status.refreshed,
+    };
   } catch (error) {
     const isAuthError =
       error instanceof WithingsError &&
@@ -45,9 +48,14 @@ export async function withingsRequestWithRetry<T>(
       throw error;
     }
     try {
-      const refreshed = await refreshAccessToken(status.tokens.refresh_token);
-      await setTokens(userId, refreshed);
-      return await requestFn(refreshed.access_token);
+      const refreshed = await refreshAccessToken(status.tokenBundle.refresh_token);
+      const data = await requestFn(refreshed.access_token);
+      return {
+        kind: "ok",
+        data,
+        tokenBundle: refreshed,
+        refreshed: true,
+      };
     } catch {
       return { kind: "reauth_required" };
     }

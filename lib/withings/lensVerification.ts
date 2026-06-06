@@ -16,18 +16,24 @@ export async function verifyLensProfileOwnership(
     const accountResult = await fetchAccount(lensClient, {
       address: evmAddress(profileId),
     });
+    const accountFetchFailed = accountResult.isErr();
 
     console.log("Lens account fetch result:", {
-      isErr: accountResult.isErr(),
-      hasValue: !!accountResult.value,
-      error: accountResult.isErr() ? accountResult.error : undefined,
+      isErr: accountFetchFailed,
+      hasValue: accountFetchFailed ? false : !!accountResult.value,
+      error: accountFetchFailed ? accountResult.error : undefined,
     });
 
-    if (accountResult.isErr() || !accountResult.value) {
+    if (accountFetchFailed) {
       console.warn("Lens account not found or error:", {
         profileId,
-        error: accountResult.isErr() ? accountResult.error : "no value",
+        error: accountResult.error,
       });
+      return false;
+    }
+
+    if (!accountResult.value) {
+      console.warn("Lens account not found:", { profileId });
       return false;
     }
 
