@@ -19,8 +19,6 @@ export default async function handler(
   try {
     console.log("Withings auth/start called:", {
       method: req.method,
-      hasHeaders: !!req.headers,
-      headerKeys: Object.keys(req.headers),
       url: req.url,
     });
 
@@ -98,17 +96,21 @@ export default async function handler(
       return;
     }
 
-    // Use profileId to allow multiple profiles per wallet.
-    const userId = auth.profileId.toLowerCase();
     const state = crypto.randomUUID();
 
     try {
-      await setState(state, userId, STATE_TTL_SECONDS);
+      await setState(
+        state,
+        {
+          address: auth.address,
+          profileId: auth.profileId,
+        },
+        STATE_TTL_SECONDS
+      );
     } catch (error) {
       console.error("Failed to set state in Redis:", {
         profileId: auth.profileId,
         address: auth.address,
-        state,
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
       });

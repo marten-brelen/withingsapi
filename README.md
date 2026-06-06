@@ -11,7 +11,7 @@ Serverless API routes for Withings OAuth and data access for Medoxie.
 - `WITHINGS_OAUTH_BASE_URL` (optional, defaults to `https://account.withings.com`)
 - `WITHINGS_SCOPES` (optional, defaults to `user.metrics,user.activity,user.sleepevents`)
 - `TOKEN_STORE_URL` (Upstash Redis REST URL)
-- `TOKEN_STORE_TOKEN` (Upstash Redis REST token)
+- `TOKEN_STORE_TOKEN` (Upstash Redis REST token; used only for short-lived OAuth state/results)
 - `MEDOXIE_REDIRECT_URL` (optional, defaults to `https://medoxie.com?withings=success`)
 - `LENS_ENVIRONMENT` (optional, `development` or `production`, defaults to `production`)
 
@@ -50,10 +50,17 @@ path: /sleep
 - `GET /api/health`
 - `GET /api/withings/auth/start`
 - `GET /api/withings/auth/callback`
+- `POST /api/withings/auth/result`
 - `POST /api/withings/token/refresh`
-- `GET /api/withings/sleep?startdate=...&enddate=...`
-- `GET /api/withings/measure?startdate=...&enddate=...`
-- `GET /api/withings/activity?startdate=...&enddate=...`
+- `POST /api/withings/sleep`
+- `POST /api/withings/measure`
+- `POST /api/withings/activity`
+
+OAuth callback stores a one-time encrypted-result handoff in Redis with a short TTL and redirects
+to Medoxie with `withings_result=<opaque-id>`. Medoxie must consume that result once through
+`/auth/result`, encrypt the returned token bundle client-side, and include the decrypted
+`tokenBundle` in subsequent token-bearing request bodies. The server must not write long-lived
+`withings:tokens:*` keys.
 
 ## Example curl
 
@@ -89,10 +96,12 @@ address: ${ADDRESS}
 profileId: ${PROFILE_ID}
 timestamp: ${TIMESTAMP}
 path: /token/refresh" \
-  -H "x-medoxie-signature: ${SIGNATURE}"
+  -H "x-medoxie-signature: ${SIGNATURE}" \
+  -H "Content-Type: application/json" \
+  --data '{"tokenBundle":{"access_token":"...","refresh_token":"...","expires_at":1706745600000,"scope":"user.metrics,user.activity,user.sleepevents"}}'
 
 # Sleep summary
-curl "https://your-vercel-domain.com/api/withings/sleep?startdate=1706140800&enddate=1706745600" \
+curl -X POST "https://your-vercel-domain.com/api/withings/sleep" \
   -H "x-medoxie-address: ${ADDRESS}" \
   -H "x-medoxie-profile-id: ${PROFILE_ID}" \
   -H "x-medoxie-timestamp: ${TIMESTAMP}" \
@@ -101,10 +110,12 @@ address: ${ADDRESS}
 profileId: ${PROFILE_ID}
 timestamp: ${TIMESTAMP}
 path: /sleep" \
-  -H "x-medoxie-signature: ${SIGNATURE}"
+  -H "x-medoxie-signature: ${SIGNATURE}" \
+  -H "Content-Type: application/json" \
+  --data '{"startdate":"1706140800","enddate":"1706745600","tokenBundle":{"access_token":"...","refresh_token":"...","expires_at":1706745600000,"scope":"user.sleepevents"}}'
 
 # Measures
-curl "https://your-vercel-domain.com/api/withings/measure?startdate=1706140800&enddate=1706745600" \
+curl -X POST "https://your-vercel-domain.com/api/withings/measure" \
   -H "x-medoxie-address: ${ADDRESS}" \
   -H "x-medoxie-profile-id: ${PROFILE_ID}" \
   -H "x-medoxie-timestamp: ${TIMESTAMP}" \
@@ -113,10 +124,12 @@ address: ${ADDRESS}
 profileId: ${PROFILE_ID}
 timestamp: ${TIMESTAMP}
 path: /measure" \
-  -H "x-medoxie-signature: ${SIGNATURE}"
+  -H "x-medoxie-signature: ${SIGNATURE}" \
+  -H "Content-Type: application/json" \
+  --data '{"startdate":"1706140800","enddate":"1706745600","tokenBundle":{"access_token":"...","refresh_token":"...","expires_at":1706745600000,"scope":"user.metrics"}}'
 
 # Activity
-curl "https://your-vercel-domain.com/api/withings/activity?startdate=1706140800&enddate=1706745600" \
+curl -X POST "https://your-vercel-domain.com/api/withings/activity" \
   -H "x-medoxie-address: ${ADDRESS}" \
   -H "x-medoxie-profile-id: ${PROFILE_ID}" \
   -H "x-medoxie-timestamp: ${TIMESTAMP}" \
@@ -125,7 +138,9 @@ address: ${ADDRESS}
 profileId: ${PROFILE_ID}
 timestamp: ${TIMESTAMP}
 path: /activity" \
-  -H "x-medoxie-signature: ${SIGNATURE}"
+  -H "x-medoxie-signature: ${SIGNATURE}" \
+  -H "Content-Type: application/json" \
+  --data '{"startdate":"1706140800","enddate":"1706745600","tokenBundle":{"access_token":"...","refresh_token":"...","expires_at":1706745600000,"scope":"user.activity"}}'
 ```
 
 ## Basic integration test approach (pseudocode)
@@ -133,8 +148,9 @@ path: /activity" \
 ```
 1. Call /api/withings/auth/start with valid wallet + profile headers.
 2. Open returned url and complete Withings consent.
-3. Verify /api/withings/auth/callback stores tokens (check via Redis).
-4. Call /api/withings/sleep with wallet + profile headers and date range.
-5. Expire access token in Redis, call again to verify refresh.
-6. Delete tokens, call sleep endpoint and confirm 401 not_connected.
+3. Verify `/api/withings/auth/callback` stores a one-time result, not long-lived tokens.
+4. Consume `/api/withings/auth/result` once with the same wallet + profile headers.
+5. Call `/api/withings/sleep` with wallet + profile headers, date range, and token bundle body.
+6. Expire the client-supplied access token, call again, and verify the response returns a replacement token bundle.
+7. Reuse the consumed result id and confirm it fails.
 ```

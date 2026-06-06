@@ -7,7 +7,8 @@ import {
 } from "../../../lib/withings/http";
 import { verifyWithingsAuth } from "../../../lib/withings/auth";
 import { refreshAccessToken, buildAuthorizeUrl } from "../../../lib/withings/oauth";
-import { getTokens, setTokens, setState } from "../../../lib/withings/tokenStore";
+import { setState } from "../../../lib/withings/tokenStore";
+import { readTokenPayload } from "../../../lib/withings/tokenPayload";
 import crypto from "crypto";
 
 export default async function handler(
@@ -15,7 +16,7 @@ export default async function handler(
   res: VercelResponse
 ): Promise<void> {
   if (!requireMethod(req, res, "POST")) return;
-  if (!rejectLargeBody(req, res, 1024)) return;
+  if (!rejectLargeBody(req, res, 16 * 1024)) return;
 
   let auth;
   try {
@@ -34,15 +35,16 @@ export default async function handler(
     return;
   }
 
-  // Use profileId to allow multiple profiles per wallet.
-  const userId = auth.profileId.toLowerCase();
-
-  const stored = await getTokens(userId);
-  if (!stored) {
+  const payload = await readTokenPayload(req, res, { sendMissingError: false });
+  if (!payload) {
     // Generate OAuth URL for user to connect
     try {
       const state = crypto.randomUUID();
-      await setState(state, userId, 10 * 60); // 10 minutes TTL
+      await setState(
+        state,
+        { address: auth.address, profileId: auth.profileId },
+        10 * 60
+      );
       const url = buildAuthorizeUrl(state);
       sendJson(res, 401, {
         error: "oauth_required",
@@ -61,9 +63,8 @@ export default async function handler(
   }
 
   try {
-    const refreshed = await refreshAccessToken(stored.refresh_token);
-    await setTokens(userId, refreshed);
-    sendJson(res, 200, { ok: true, expires_at: refreshed.expires_at });
+    const refreshed = await refreshAccessToken(payload.tokenBundle.refresh_token);
+    sendJson(res, 200, { ok: true, tokenBundle: refreshed });
   } catch {
     sendError(res, 401, "reauth_required", "Refresh failed");
   }

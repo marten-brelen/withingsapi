@@ -1,12 +1,16 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import crypto from "crypto";
 import { getActivity, WithingsError } from "../../lib/withings/client";
 import { withingsRequestWithRetry } from "../../lib/withings/data";
 import { verifyWithingsAuth } from "../../lib/withings/auth";
 import { buildAuthorizeUrl } from "../../lib/withings/oauth";
 import { setState } from "../../lib/withings/tokenStore";
-import crypto from "crypto";
 import {
-  getRequiredDateParam,
+  getRequiredDateFromQueryOrBody,
+  readTokenPayload,
+} from "../../lib/withings/tokenPayload";
+import {
+  rejectLargeBody,
   requireMethod,
   sendError,
   sendJson,
@@ -16,7 +20,8 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ): Promise<void> {
-  if (!requireMethod(req, res, "GET")) return;
+  if (!requireMethod(req, res, "POST")) return;
+  if (!rejectLargeBody(req, res, 16 * 1024)) return;
 
   let auth;
   try {
@@ -35,46 +40,48 @@ export default async function handler(
     return;
   }
 
-  // Use profileId to allow multiple profiles per wallet.
-  const userId = auth.profileId.toLowerCase();
-
-  const startdate = getRequiredDateParam(req, res, "startdate");
-  const enddate = getRequiredDateParam(req, res, "enddate");
+  const startdate = await getRequiredDateFromQueryOrBody(req, res, "startdate");
+  const enddate = await getRequiredDateFromQueryOrBody(req, res, "enddate");
   if (!startdate || !enddate) return;
 
+  const payload = await readTokenPayload(req, res, { sendMissingError: false });
+  if (!payload) {
+    try {
+      const state = crypto.randomUUID();
+      await setState(
+        state,
+        { address: auth.address, profileId: auth.profileId },
+        10 * 60
+      );
+      const url = buildAuthorizeUrl(state);
+      sendJson(res, 401, {
+        error: "oauth_required",
+        message: "Please connect your Withings account",
+        url,
+      });
+      return;
+    } catch (error) {
+      console.error("Failed to generate OAuth URL:", {
+        profileId: auth.profileId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      sendError(res, 500, "server_error", "Failed to generate OAuth URL");
+      return;
+    }
+  }
+
   try {
-    const result = await withingsRequestWithRetry(userId, (accessToken) =>
+    const result = await withingsRequestWithRetry(payload.tokenBundle, (accessToken) =>
       getActivity(accessToken, startdate, enddate)
     );
-    if (
-      typeof result === "object" &&
-      result &&
-      ("kind" in result &&
-        (result.kind === "not_connected" || result.kind === "reauth_required"))
-    ) {
-      if (result.kind === "not_connected" || result.kind === "reauth_required") {
-        // Generate OAuth URL for user to connect
-        try {
-          const state = crypto.randomUUID();
-          await setState(state, userId, 10 * 60); // 10 minutes TTL
-          const url = buildAuthorizeUrl(state);
-          sendJson(res, 401, {
-            error: "oauth_required",
-            message: "Please connect your Withings account",
-            url,
-          });
-          return;
-        } catch (error) {
-          console.error("Failed to generate OAuth URL:", {
-            profileId: auth.profileId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          sendError(res, 500, "server_error", "Failed to generate OAuth URL");
-          return;
-        }
-      }
+    if (result.kind === "reauth_required") {
+      sendError(res, 401, "reauth_required", "Please reconnect your Withings account");
+      return;
     }
-    sendJson(res, 200, { data: result });
+    sendJson(res, 200, {
+      data: result.data,
+      ...(result.refreshed ? { tokenBundle: result.tokenBundle } : {}),
+    });
   } catch (error) {
     if (error instanceof WithingsError) {
       sendError(
