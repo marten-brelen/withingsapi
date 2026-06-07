@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "crypto";
 import test from "node:test";
 import { privateKeyToAccount } from "viem/accounts";
+import authCallbackHandler from "../api/withings/auth/callback";
 import authResultHandler from "../api/withings/auth/result";
 import authStartHandler from "../api/withings/auth/start";
 import measureHandler from "../api/withings/measure";
@@ -18,6 +19,37 @@ test("auth/result is retained as a clear 410 compatibility endpoint", async () =
 
   assert.equal(res.statusCode, 410);
   assert.equal(res.body.error, "oauth_result_removed");
+});
+
+test("auth/callback allows Withings dashboard reachability probes", async () => {
+  for (const method of ["GET", "HEAD", "POST", "OPTIONS"]) {
+    const res = createResponse();
+    await authCallbackHandler(
+      { method, headers: {}, query: {} } as never,
+      res as never
+    );
+
+    assert.equal(res.statusCode, 200, method);
+    if (method !== "HEAD" && method !== "OPTIONS") {
+      assert.equal(res.body.ok, true);
+      assert.equal(res.body.endpoint, "withings_oauth_callback");
+    }
+  }
+});
+
+test("auth/callback still rejects non-GET OAuth callback attempts", async () => {
+  const res = createResponse();
+  await authCallbackHandler(
+    {
+      method: "POST",
+      headers: {},
+      query: { state: "sealed-state", code: "oauth-code" },
+    } as never,
+    res as never
+  );
+
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, "method_not_allowed");
 });
 
 test("auth/start accepts encrypted callback metadata and returns a sealed state URL", async () => {
