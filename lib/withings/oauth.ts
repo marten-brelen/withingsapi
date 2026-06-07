@@ -1,4 +1,4 @@
-import { TokenBundle } from "./tokenStore";
+import { TokenBundle } from "./tokenTypes";
 
 const DEFAULT_SCOPES = ["user.metrics", "user.activity", "user.sleepevents"];
 

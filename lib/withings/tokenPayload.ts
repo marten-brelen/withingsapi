@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getRequiredDateParam, parseJsonBody, sendError } from "./http";
-import { TokenBundle } from "./tokenStore";
+import { TokenBundle } from "./tokenTypes";
 
 export type TokenPayload = {
   tokenBundle: TokenBundle;

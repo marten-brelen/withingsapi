@@ -6,10 +6,8 @@ import {
   sendJson,
 } from "../../../lib/withings/http";
 import { verifyWithingsAuth } from "../../../lib/withings/auth";
-import { refreshAccessToken, buildAuthorizeUrl } from "../../../lib/withings/oauth";
-import { setState } from "../../../lib/withings/tokenStore";
+import { refreshAccessToken } from "../../../lib/withings/oauth";
 import { readTokenPayload } from "../../../lib/withings/tokenPayload";
-import crypto from "crypto";
 
 export default async function handler(
   req: VercelRequest,
@@ -37,29 +35,13 @@ export default async function handler(
 
   const payload = await readTokenPayload(req, res, { sendMissingError: false });
   if (!payload) {
-    // Generate OAuth URL for user to connect
-    try {
-      const state = crypto.randomUUID();
-      await setState(
-        state,
-        { address: auth.address, profileId: auth.profileId },
-        10 * 60
-      );
-      const url = buildAuthorizeUrl(state);
-      sendJson(res, 401, {
-        error: "oauth_required",
-        message: "Please connect your Withings account",
-        url,
-      });
-      return;
-    } catch (error) {
-      console.error("Failed to generate OAuth URL:", {
-        profileId: auth.profileId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      sendError(res, 500, "server_error", "Failed to generate OAuth URL");
-      return;
-    }
+    sendError(
+      res,
+      401,
+      "oauth_required",
+      "Please reconnect your Withings account from Medoxie"
+    );
+    return;
   }
 
   try {
