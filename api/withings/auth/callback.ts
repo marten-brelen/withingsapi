@@ -1,14 +1,14 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import crypto from "crypto";
 import {
   enforceHttps,
   requireMethod,
   sendError,
 } from "../../../lib/withings/http";
 import { exchangeCodeForTokens } from "../../../lib/withings/oauth";
-import { consumeState, setOAuthResult } from "../../../lib/withings/tokenStore";
-
-const RESULT_TTL_SECONDS = 10 * 60;
+import {
+  encryptTokenHandoff,
+  openOAuthState,
+} from "../../../lib/withings/oauthHandoff";
 
 export default async function handler(
   req: VercelRequest,
@@ -25,35 +25,40 @@ export default async function handler(
     return;
   }
 
-  const owner = await consumeState(state);
-  if (!owner) {
-    sendError(res, 400, "invalid_state", "Invalid or expired state");
+  let owner;
+  try {
+    owner = openOAuthState(state);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "invalid_state";
+    sendError(
+      res,
+      400,
+      code === "expired_state" ? "expired_state" : "invalid_state",
+      "Invalid or expired state"
+    );
     return;
   }
 
-  let resultId: string;
+  let encryptedPayload: string;
   try {
     const tokens = await exchangeCodeForTokens(code);
-    resultId = crypto.randomUUID();
-    await setOAuthResult(
-      resultId,
-      {
-        ...owner,
-        tokenBundle: tokens,
-        createdAt: Date.now(),
-      },
-      RESULT_TTL_SECONDS
-    );
+    encryptedPayload = encryptTokenHandoff({
+      state: owner,
+      tokenBundle: tokens,
+    });
   } catch {
     sendError(res, 500, "oauth_error", "Failed to exchange code for tokens");
     return;
   }
 
-  const redirectTarget =
-    process.env.MEDOXIE_REDIRECT_URL || "https://medoxie.com?withings=success";
+  const redirectTarget = process.env.MEDOXIE_REDIRECT_URL || "https://medoxie.com";
   const redirectUrl = new URL(redirectTarget);
-  redirectUrl.searchParams.set("withings", "success");
-  redirectUrl.searchParams.set("withings_result", resultId);
+  redirectUrl.searchParams.delete("withings");
+  redirectUrl.searchParams.delete("withings_result");
+  redirectUrl.hash = new URLSearchParams({
+    withings: "success",
+    withings_payload: encryptedPayload,
+  }).toString();
   res.status(302).setHeader("Location", redirectUrl.toString());
   res.end();
 }

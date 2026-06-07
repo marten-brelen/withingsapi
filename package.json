@@ -8,16 +8,16 @@
   },
   "scripts": {
     "lint": "echo \"No lint configured\"",
-    "test": "echo \"No tests configured\""
+    "test": "tsc --noEmit && node --test --import tsx tests/*.test.ts"
   },
   "dependencies": {
-    "@upstash/redis": "^1.34.9",
     "@lens-protocol/client": "canary",
     "viem": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.0.10",
     "@vercel/node": "^5.5.27",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }
 }

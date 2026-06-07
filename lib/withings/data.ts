@@ -1,6 +1,6 @@
 import { WithingsError } from "./client";
 import { refreshAccessToken } from "./oauth";
-import { TokenBundle } from "./tokenStore";
+import { TokenBundle } from "./tokenTypes";
 
 const REFRESH_WINDOW_MS = 30_000;
 
