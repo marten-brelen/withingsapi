@@ -269,12 +269,21 @@ function decodeSecret(value: string): Buffer {
 }
 
 function toBase64Url(value: Buffer): string {
-  return value.toString("base64url");
+  return base64ToBase64Url(value.toString("base64"));
 }
 
 function fromBase64Url(value: string): Buffer {
   if (!/^[A-Za-z0-9_-]+$/.test(value)) {
     throw new Error("invalid_base64url");
   }
-  return Buffer.from(value, "base64url");
+  return Buffer.from(base64UrlToBase64(value), "base64");
+}
+
+function base64ToBase64Url(value: string): string {
+  return value.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlToBase64(value: string): string {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  return base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
 }
